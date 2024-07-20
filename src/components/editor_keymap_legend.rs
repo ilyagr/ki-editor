@@ -33,13 +33,13 @@ impl Editor {
             title: "Movements (Core)".to_string(),
             keymaps: Keymaps::new(&[
                 Keymap::new(
-                    "h",
-                    "Higher (Previous)".to_string(),
+                    "b",
+                    "Previous".to_string(),
                     Dispatch::ToEditor(MoveSelection(Movement::Previous)),
                 ),
                 Keymap::new(
-                    "l",
-                    "Lower (Next)".to_string(),
+                    "e",
+                    "Next".to_string(),
                     Dispatch::ToEditor(MoveSelection(Next)),
                 ),
                 Keymap::new("k", "Up".to_string(), Dispatch::ToEditor(MoveSelection(Up))),
@@ -119,12 +119,21 @@ impl Editor {
             title: "Selection mode".to_string(),
             keymaps: Keymaps::new(&[
                 Keymap::new(
-                    "b",
-                    "Between".to_string(),
+                    "g",
+                    "Find (Global)".to_string(),
+                    Dispatch::ShowKeymapLegend(self.find_keymap_legend_config(
+                        context,
+                        Scope::Global,
+                        IfCurrentNotFound::LookForward,
+                    )),
+                ),
+                Keymap::new(
+                    "h",
+                    "Highlight (Between)".to_string(),
                     Dispatch::ShowKeymapLegend(self.between_mode_keymap_legend_config()),
                 ),
                 Keymap::new(
-                    "e",
+                    "l",
                     "Line (Trimmed)".to_string(),
                     Dispatch::ToEditor(SetSelectionMode(
                         IfCurrentNotFound::LookForward,
@@ -132,7 +141,7 @@ impl Editor {
                     )),
                 ),
                 Keymap::new(
-                    "E",
+                    "L",
                     "Line (Full)".to_string(),
                     Dispatch::ToEditor(SetSelectionMode(IfCurrentNotFound::LookForward, LineFull)),
                 ),
@@ -152,15 +161,6 @@ impl Editor {
                         context,
                         Scope::Local,
                         IfCurrentNotFound::LookBackward,
-                    )),
-                ),
-                Keymap::new(
-                    "g",
-                    "Find (Global)".to_string(),
-                    Dispatch::ShowKeymapLegend(self.find_keymap_legend_config(
-                        context,
-                        Scope::Global,
-                        IfCurrentNotFound::LookForward,
                     )),
                 ),
                 Keymap::new(
