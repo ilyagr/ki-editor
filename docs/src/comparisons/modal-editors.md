@@ -1,22 +1,23 @@
 # Comparisons with other modal editors
 
-| Aspect                 | Ki                                 | Vim/Neovim        | Helix             |
-| ---------------------- | ---------------------------------- | ----------------- | ----------------- |
-| Mental model           | Selection mode → Movement → Action | Action → Movement | Movement → Action |
-| Structural editing     | First-class                        | With plugin       | Second class[^1]  |
-| Multi-cursor           | Good                               | With plugin       | Extensive         |
-| Built-in file explorer | Yes                                | Yes (but buggy)   | No                |
-| Built-in LSP           | Yes                                | Require config    | Yes               |
-| Performance            | Good                               | Great             | Fastest           |
-| Keybindings coherence  | High                               | Low               | Low               |
-| GNU Readline Support   | Everywhere [^2]                    | Minimal           | Inconsistent [^3] |
+| Aspect                           | Ki                                 | Vim/Neovim        | Helix             |
+| -------------------------------- | ---------------------------------- | ----------------- | ----------------- |
+| Mental model                     | Selection mode → Movement → Action | Action → Movement | Movement → Action |
+| Structural editing               | First-class                        | With plugin       | Second class[^1]  |
+| Multi-cursor                     | Good                               | With plugin       | Extensive         |
+| Built-in file explorer           | Yes                                | Yes (but buggy)   | No                |
+| Built-in LSP                     | Yes                                | Require config    | Yes               |
+| Built-in global search & replace | Yes                                | Require config    | Partial           |
+| Performance                      | Good                               | Great             | Fastest           |
+| Keybindings coherence            | High                               | Low               | Low               |
+| GNU Readline Support             | Everywhere [^2]                    | Minimal           | Inconsistent [^3] |
 
 [^1]:
     The default keybindings for structural navigation in Helix are hard to access: `alt+n`, `alt+p`, `alt+i` and `alt+o`.
     Also, there's no easy way to [revert to previous selection](../normal-mode/other-movements.md#go-backforward), which is crucial for structural manipulation.
 
 [^2]: Not all GNU Readline keybindings are implemented, but they are welcomed.
-[^3]: Extensive support in Prompt, but minimal support in Editor.
+[^3]: Extensive support in Prompt, but partial support in Editor.
 
 ## Keybindings coherence
 
