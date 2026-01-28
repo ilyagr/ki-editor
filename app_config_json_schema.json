@@ -71,7 +71,8 @@
         "Heex",
         "Toml",
         "KiQuickfix",
-        "Haskell"
+        "Haskell",
+        "Hcl"
       ]
     },
     "Command": {
@@ -425,7 +426,8 @@
             "Help",
             "KeyboardLayout",
             "Reveal",
-            "CurrentFileParentFolder"
+            "CurrentFileParentFolder",
+            "LspProgress"
           ]
         },
         {
