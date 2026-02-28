@@ -206,6 +206,10 @@ impl Context {
         &self.quickfix_list
     }
 
+    pub fn quickfix_list_mut(&mut self) -> &mut QuickfixList {
+        &mut self.quickfix_list
+    }
+
     pub(crate) fn get_quickfix_list_item(
         &mut self,
         movement: crate::components::editor::Movement,
@@ -213,10 +217,18 @@ impl Context {
         self.quickfix_list.get_item(movement)
     }
 
-    pub(crate) fn set_quickfix_list_items(&mut self, title: &str, items: Vec<QuickfixListItem>) {
-        self.quickfix_list.set_title(title);
+    pub fn set_quickfix_list_items(
+        &mut self,
+        items: Vec<QuickfixListItem>,
+        kind: Option<QuickfixListKind>,
+    ) {
         self.quickfix_list
             .set_items(items, &self.current_working_directory);
+        self.quickfix_list.set_kind(kind);
+    }
+
+    pub fn set_quickfix_list_title(&mut self, title: &str) {
+        self.quickfix_list.set_title(title);
     }
 
     pub(crate) fn quickfix_list_items_count(&self) -> usize {
@@ -231,6 +243,10 @@ impl Context {
     pub(crate) fn get_last_visited_file(&self) -> Option<&Location> {
         self.location_history_backward.last()
     }
+}
+
+pub enum QuickfixListKind {
+    Mark,
 }
 
 impl Context {

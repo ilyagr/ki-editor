@@ -4013,3 +4013,89 @@ fn untoggling_marks_should_not_file_mark_current_file() -> Result<(), anyhow::Er
         ])
     })
 }
+
+#[test]
+fn marking_selections_should_refresh_mark_quickfix() -> Result<(), anyhow::Error> {
+    execute_test(|s| {
+        Box::new([
+            App(OpenFile {
+                path: s.foo_rs(),
+                owner: BufferOwner::User,
+                focus: true,
+            }),
+            Editor(SetContent("foo\nbar\nspam".to_string())),
+            Editor(Save),
+            Editor(DispatchEditor::SetSelectionMode(
+                IfCurrentNotFound::LookForward,
+                Word,
+            )),
+            Editor(CursorAddToAllSelections),
+            Expect(CurrentSelectedTexts(&["foo", "bar", "spam"])),
+            App(ToggleSelectionMark),
+            Editor(CursorKeepPrimaryOnly),
+            Expect(CurrentSelectedTexts(&["foo"])),
+            App(SetQuickfixList(QuickfixListType::Mark)),
+            Expect(ExpectKind::QuickfixListContent(
+                "
+src/foo.rs
+    1:1  foo
+    2:1  bar
+    3:1  spam
+    "
+                .trim()
+                .to_string(),
+            )),
+            Editor(MoveSelection(Movement::Next)),
+            Expect(CurrentSelectedTexts(&["bar"])),
+            // When we untoggled a mark, we expect the quickfix list to be updated
+            App(ToggleSelectionMark),
+            Expect(AppGrid(
+                " [÷] 🦀  foo.rs
+1│foo
+2│█ar
+3│spam
+
+
+
+
+
+
+
+
+
+
+
+
+Quickfix list
+1│src/foo.rs
+2│    1:1  foo
+3│█   3:1  spam"
+                    .to_string(),
+            )),
+            Expect(ExpectKind::QuickfixListContent(
+                "
+src/foo.rs
+    1:1  foo
+    3:1  spam
+    "
+                .trim()
+                .to_string(),
+            )),
+            Editor(MoveSelection(Movement::Next)),
+            // Note that it shouldn't select `foo`, because the focused index in the quickfix list
+            // shouldn't be updated
+            Expect(CurrentSelectedTexts(&["spam"])),
+            App(ToggleSelectionMark),
+            Expect(ExpectKind::QuickfixListContent(
+                "
+src/foo.rs
+    1:1  foo
+    "
+                .trim()
+                .to_string(),
+            )),
+            Editor(MoveSelection(Movement::Previous)),
+            Expect(CurrentSelectedTexts(&["foo"])),
+        ])
+    })
+}
