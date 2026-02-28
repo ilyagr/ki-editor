@@ -3901,7 +3901,34 @@ fn go_to_file_under_selection() -> Result<(), anyhow::Error> {
                 SelectionMode::Line,
             )),
             Editor(GoToFile),
+            Expect(MarkedFiles([].to_vec())), // GoToFile should not mark if only a single file was opened
             Expect(CurrentComponentPath(Some(s.foo_rs()))),
+        ])
+    })
+}
+
+#[test]
+fn go_to_file_with_multiple_selections() -> Result<(), anyhow::Error> {
+    execute_test(|s| {
+        Box::new([
+            App(OpenFile {
+                path: s.main_rs(),
+                owner: BufferOwner::User,
+                focus: true,
+            }),
+            Editor(SetContent(format!(
+                "{}\n{}",
+                s.foo_rs().display_absolute(),
+                s.hello_ts().display_absolute()
+            ))),
+            Editor(SetSelectionMode(
+                IfCurrentNotFound::LookForward,
+                SelectionMode::Line,
+            )),
+            Editor(CursorAddToAllSelections),
+            Editor(GoToFile),
+            Expect(CurrentComponentPath(Some(s.foo_rs()))),
+            Expect(MarkedFiles([s.foo_rs(), s.hello_ts()].to_vec())),
         ])
     })
 }

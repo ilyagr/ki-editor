@@ -4414,11 +4414,38 @@ impl Editor {
     }
 
     fn go_to_file(&self) -> Result<Dispatches, anyhow::Error> {
-        Ok(Dispatches::one(Dispatch::OpenFile {
-            path: self.current_primary_selection()?.try_into()?,
-            owner: crate::buffer::BufferOwner::User,
-            focus: true,
-        }))
+        let paths: Vec<AbsolutePath> = self
+            .selection_set
+            .selections
+            .iter()
+            .map(|selection| {
+                self.buffer()
+                    .slice(&selection.extended_range())?
+                    .to_string()
+                    .try_into()
+            })
+            .collect::<anyhow::Result<Vec<AbsolutePath>>>()?;
+
+        // When we have only one file to open, we do not mark it as we would most of the time want
+        // a sneak-and-return usage. But, for multiple selections, since non-marked files don't
+        // show up on the tab bar, it is better to mark them for visibility.
+        //
+        // @wongjiahau has termed this Behavioral Asymmetry.
+
+        match paths.as_slice() {
+            [] => Err(anyhow::anyhow!(
+                "Can't go to file. Requires atleast one selection to be made."
+            )),
+            [path] => Ok(Dispatches::one(Dispatch::OpenFile {
+                path: path.clone(),
+                owner: crate::buffer::BufferOwner::User,
+                focus: true,
+            })),
+            paths => {
+                let paths = NonEmpty::from_vec(paths.to_vec()).unwrap();
+                Ok(Dispatches::one(Dispatch::OpenAndMarkFiles(paths)))
+            }
+        }
     }
 
     fn press_space(&self, context: &Context) -> Dispatches {
