@@ -3649,6 +3649,57 @@ fn lsp_initialization_should_only_send_relevant_opened_documents() -> anyhow::Re
 }
 
 #[test]
+fn open_git_branch_picker() -> anyhow::Result<()> {
+    execute_test(|s| {
+        let temp_dir = s.temp_dir();
+        let _ = std::env::set_current_dir(temp_dir.clone());
+        Box::new([
+            Expect(CurrentWorkingDirectory(s.temp_dir())),
+            Shell(
+                "git",
+                ["branch".to_string(), "test-branch-picker".to_string()].to_vec(),
+            ),
+            // Commit all files so that we can switch branch later
+            Shell("git", ["add".to_string(), ".".to_string()].to_vec()),
+            Shell(
+                "git",
+                [
+                    "commit".to_string(),
+                    "-m".to_string(),
+                    "add all files".to_string(),
+                ]
+                .to_vec(),
+            ),
+            App(OpenGitBranchPrompt),
+            Expect(ExpectKind::ComponentsOrder(vec![
+                ComponentKind::Prompt,
+                ComponentKind::Dropdown,
+            ])),
+            Expect(CompletionDropdownContentString(
+                "master\ntest-branch-picker".to_string(),
+            )),
+            App(HandleKeyEvents(keys!("alt+l alt+x").to_vec())),
+            Expect(CurrentComponentContent("test-branch-picker")),
+            App(HandleKeyEvents(keys!("enter").to_vec())),
+            Expect(ExpectKind::CompletionDropdownIsOpen(false)),
+            ExpectCustom(Box::new({
+                let temp_dir = temp_dir.clone();
+                move || {
+                    let path = temp_dir.to_path_buf();
+                    let output = std::process::Command::new("git")
+                        .current_dir(path)
+                        .args(["branch", "--show-current"])
+                        .output()
+                        .unwrap();
+                    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    assert_eq!(branch, "test-branch-picker");
+                }
+            })),
+        ])
+    })
+}
+
+#[test]
 fn navigate_back_should_skip_files_that_were_renamed_or_deleted() -> anyhow::Result<()> {
     execute_test(|s| {
         Box::new([

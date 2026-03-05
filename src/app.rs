@@ -1081,6 +1081,8 @@ impl<T: Frontend> App<T> {
             Dispatch::OpenAlternateFile => self.open_alternate_file()?,
             Dispatch::PushPromptHistory { key, line } => self.push_history_prompt(key, line),
             Dispatch::OpenThemePicker => self.open_theme_picker()?,
+            Dispatch::OpenGitBranchPrompt => self.open_git_branch_picker()?,
+            Dispatch::GitCheckout(branch) => self.git_checkout(&branch)?,
             Dispatch::SetLastNonContiguousSelectionMode(selection_mode) => self
                 .context
                 .set_last_non_contiguous_selection_mode(selection_mode),
@@ -2674,6 +2676,30 @@ impl<T: Frontend> App<T> {
         self.context.push_history_prompt(key, line);
     }
 
+    fn open_git_branch_picker(&mut self) -> anyhow::Result<()> {
+        let repo = git2::Repository::open(self.working_directory().display_absolute())?;
+
+        let dropdown_items: Vec<DropdownItem> = repo
+            .branches(None)?
+            .filter_map(|res| res.ok()) // Skip branches that error during iteration
+            .filter_map(|(branch, _)| {
+                // Transform the branch into a DropdownItem if the name is valid
+                branch.name().ok().flatten().map(|name| {
+                    let branch_name = name.to_string();
+                    DropdownItem::new(branch_name.clone())
+                        .set_dispatches(Dispatches::one(Dispatch::GitCheckout(branch_name)))
+                })
+            })
+            .collect();
+
+        self.open_prompt(PromptConfig::new(
+            "Git Branch".to_string(),
+            PromptOnEnter::SelectsFirstMatchingItem {
+                items: PromptItems::Precomputed(dropdown_items),
+            },
+        ))
+    }
+
     fn open_theme_picker(&mut self) -> anyhow::Result<()> {
         self.open_prompt(
             PromptConfig::new(
@@ -2701,6 +2727,22 @@ impl<T: Frontend> App<T> {
                 self.context.theme().clone(),
             )))),
         )
+    }
+
+    fn git_checkout(&mut self, branch: &str) -> anyhow::Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["checkout", branch])
+            .current_dir(self.context.current_working_directory())
+            .output()?;
+
+        let content = if output.status.success() {
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        } else {
+            String::from_utf8_lossy(&output.stderr).into_owned()
+        };
+
+        let info = Info::new("Git Checkout Success".to_string(), content);
+        self.show_editor_info(info)
     }
 
     fn open_keyboard_layout_picker(&mut self) -> anyhow::Result<()> {
@@ -3730,6 +3772,8 @@ pub enum Dispatch {
         line: String,
     },
     OpenThemePicker,
+    OpenGitBranchPrompt,
+    GitCheckout(String),
     ResolveCompletionItem(lsp_types::CompletionItem),
     OpenPipeToShellPrompt,
     SetLastNonContiguousSelectionMode(Either<SelectionMode, GlobalMode>),
