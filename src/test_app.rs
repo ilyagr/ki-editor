@@ -4101,7 +4101,7 @@ src/foo.rs
             // When we untoggled a mark, we expect the quickfix list to be updated
             App(ToggleSelectionMark),
             Expect(AppGrid(
-                " [÷] 🦀  foo.rs
+                " [-] 🦀  foo.rs
 1│foo
 2│█ar
 3│spam
@@ -4147,6 +4147,53 @@ src/foo.rs
             )),
             Editor(MoveSelection(Movement::Previous)),
             Expect(CurrentSelectedTexts(&["foo"])),
+        ])
+    })
+}
+
+#[test]
+fn global_search_should_not_change_dirty_status() -> anyhow::Result<()> {
+    execute_test(|s| {
+        Box::new([
+            App(OpenFile {
+                path: s.main_rs(),
+                owner: BufferOwner::User,
+                focus: true,
+            }),
+            Editor(SetContent("fn main() { call_main() }".to_string())),
+            Editor(Save),
+            Expect(Not(Box::new(EditorIsDirty()))),
+            App(OpenFile {
+                path: s.foo_rs(),
+                owner: BufferOwner::User,
+                focus: true,
+            }),
+            Editor(SetContent("fn foo() { call_foo() }".to_string())),
+            Editor(Save),
+            Expect(Not(Box::new(EditorIsDirty()))),
+            App(UpdateLocalSearchConfig {
+                update: LocalSearchConfigUpdate::Search("call_main".to_string()),
+                scope: Scope::Global,
+                if_current_not_found: IfCurrentNotFound::LookForward,
+                run_search_after_config_updated: true,
+                component_id: None,
+            }),
+            WaitForAppMessage(regex!("GlobalSearchFinished")),
+            Expect(CurrentGlobalMode(Some(GlobalMode::QuickfixListItem))),
+            Expect(Quickfixes(Box::new([QuickfixListItem::new(
+                Location {
+                    path: s.main_rs(),
+                    range: (CharIndex(16)..CharIndex(25)).into(),
+                },
+                None,
+                Some("    call_main()\n".to_string()),
+            )]))),
+            App(HandleKeyEvent(key!("esc"))),
+            Expect(CurrentGlobalMode(None)),
+            Expect(CurrentComponentPath(Some(s.main_rs()))),
+            Expect(Not(Box::new(EditorIsDirty()))),
+            App(OpenAlternateFile),
+            Expect(Not(Box::new(EditorIsDirty()))),
         ])
     })
 }
