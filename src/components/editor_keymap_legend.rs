@@ -9,7 +9,7 @@ use crate::{
     app::{Dispatch, Dispatches, FilePickerKind, Scope},
     components::{
         editor::{Movement, PriorChange},
-        editor_keymap::QWERTY_STR,
+        editor_keymap::{possibly_alted, QWERTY_STR},
         keymap_legend::{MomentaryLayer, OnSpacebarTapped, OnTap},
     },
     context::{Context, LocalSearchConfigMode, Search},
@@ -146,7 +146,7 @@ impl Editor {
                 description: "≡ Buffer".to_string(),
                 config: KeymapLegendConfig {
                     title: "≡ Buffer".to_string(),
-                    keymap: buffer_keymap(),
+                    keymap: buffer_keymap(false),
                 },
                 on_tap: Some(OnTap::new(
                     "Toggle Selection Mark",
@@ -574,6 +574,22 @@ impl Editor {
                 } else {
                     Vec::default()
                 })
+                .chain(
+                    [Keybinding::momentary_layer(MomentaryLayer {
+                        key: "alt+e",
+                        description: "≡ Buffer".to_string(),
+                        config: KeymapLegendConfig {
+                            title: "≡ Buffer".to_string(),
+                            keymap: buffer_keymap(true),
+                        },
+                        on_tap: Some(OnTap::new(
+                            "Toggle Selection Mark",
+                            Dispatches::one(Dispatch::ToggleSelectionMark),
+                        )),
+                        on_spacebar_tapped: None,
+                    })]
+                    .to_vec(),
+                )
                 .collect_vec(),
             ),
         }
@@ -1679,7 +1695,7 @@ pub fn cut_keymap() -> Keymap {
     )
 }
 
-pub fn buffer_keymap() -> Keymap {
+pub fn buffer_keymap(is_alted: bool) -> Keymap {
     Keymap::new(
         &[
             ("j", Movement::Left),
@@ -1690,7 +1706,7 @@ pub fn buffer_keymap() -> Keymap {
         .into_iter()
         .map(|(key, movement)| {
             Keybinding::new(
-                key,
+                possibly_alted(key, is_alted),
                 movement.format_action("Marked File"),
                 Dispatch::CycleMarkedFile(movement),
             )
@@ -1700,32 +1716,32 @@ pub fn buffer_keymap() -> Keymap {
                 .into_iter()
                 .map(|(key, movement)| {
                     Keybinding::new(
-                        key,
+                        possibly_alted(key, is_alted),
                         movement.format_action("Opened File"),
                         Dispatch::CycleMarkedFile(movement),
                     )
                 }),
         )
         .chain(Some(Keybinding::new_extended(
-            "k",
+            possibly_alted("k", is_alted),
             "Mark File".to_string(),
             "Toggle File Mark".to_string(),
             Dispatch::ToggleFileMark,
         )))
         .chain(Some(Keybinding::new_extended(
-            "n",
+            possibly_alted("n", is_alted),
             "Close".to_string(),
             "Close current window".to_string(),
             Dispatch::CloseCurrentWindow,
         )))
         .chain(Some(Keybinding::new_extended(
-            "i",
+            possibly_alted("i", is_alted),
             "Unmark Others".to_string(),
             "Unmark all other buffers".to_string(),
             Dispatch::UnmarkAllOthers,
         )))
         .chain(Some(Keybinding::new_extended(
-            "m",
+            possibly_alted("m", is_alted),
             "Alternate".to_string(),
             "Switch to the previous file".to_string(),
             Dispatch::OpenAlternateFile,
