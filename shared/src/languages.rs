@@ -313,11 +313,7 @@ fn fsharp() -> Language {
         lsp_language_id: Some(LanguageId::new("fsharp")),
         tree_sitter_grammar_config: Some(GrammarConfig {
             id: "fsharp".to_string(),
-            kind: GrammarConfigKind::FromSource {
-                url: "https://github.com/ionide/tree-sitter-fsharp.git".to_string(),
-                commit: "main".to_string(),
-                subpath: Some("fsharp".to_string()),
-            },
+            kind: GrammarConfigKind::CargoLinked(CargoLinkedTreesitterLanguage::FSharp),
         }),
         line_comment_prefix: Some("//".to_string()),
         block_comment_affixes: Some(("(*".to_string(), "*)".to_string())),
