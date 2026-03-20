@@ -478,50 +478,22 @@ impl Editor {
                         Dispatch::ToEditor(MoveCharacterForward),
                     ),
                     Keybinding::new_descriptive(
-                        "alt+s",
+                        "alt+y",
                         "Line ←".to_string(),
                         "Move to line start".to_string(),
                         Dispatch::ToEditor(MoveToLineStart),
                     ),
                     Keybinding::new_descriptive(
-                        "alt+f",
+                        "alt+p",
                         "Line →".to_string(),
                         "Move to line end".to_string(),
                         Dispatch::ToEditor(MoveToLineEnd),
-                    ),
-                    Keybinding::new_descriptive(
-                        "alt+q",
-                        "Kill Line ←".to_string(),
-                        Direction::End.format_action("Kill line"),
-                        Dispatch::ToEditor(KillLine(Direction::Start)),
-                    ),
-                    Keybinding::new_descriptive(
-                        "alt+t",
-                        "Kill Line →".to_string(),
-                        Direction::End.format_action("Kill line"),
-                        Dispatch::ToEditor(KillLine(Direction::End)),
-                    ),
-                    Keybinding::new_descriptive(
-                        "alt+h",
-                        "Delete Word ←".to_string(),
-                        "Delete word backward".to_string(),
-                        Dispatch::ToEditor(DeleteWordBackward { short: false }),
                     ),
                     Keybinding::new_descriptive(
                         "alt+backspace",
                         "Delete Word ←".to_string(),
                         "Delete word backward".to_string(),
                         Dispatch::ToEditor(DeleteWordBackward { short: true }),
-                    ),
-                    Keybinding::new(
-                        "left",
-                        "Move back a character".to_string(),
-                        Dispatch::ToEditor(MoveCharacterBack),
-                    ),
-                    Keybinding::new(
-                        "right",
-                        "Move forward a character".to_string(),
-                        Dispatch::ToEditor(MoveCharacterForward),
                     ),
                     Keybinding::new(
                         "esc",
@@ -560,6 +532,15 @@ impl Editor {
                 } else {
                     Vec::default()
                 })
+                .chain([Keybinding::momentary_layer(MomentaryLayer {
+                    key: "alt+v",
+                    description: "Delete".to_string(),
+                    config: KeymapLegendConfig {
+                        title: "Delete".to_string(),
+                        keymap: insert_mode_delete_keymap(),
+                    },
+                    on_tap: None,
+                })])
                 .chain(
                     [Keybinding::momentary_layer(MomentaryLayer {
                         key: "alt+e",
@@ -1602,6 +1583,58 @@ pub fn paste_keymap() -> Keymap {
                 "k",
                 Movement::Down.format_action("Paste"),
                 Dispatch::ToEditor(PasteVertically(Direction::End)),
+            ),
+        ]
+        .as_ref(),
+    )
+}
+
+pub fn insert_mode_delete_keymap() -> Keymap {
+    Keymap::new(
+        [
+            Keybinding::new_descriptive(
+                "alt+y",
+                "Kill Line ←".to_string(),
+                Direction::End.format_action("Kill line"),
+                Dispatch::ToEditor(KillLine(Direction::Start)),
+            ),
+            Keybinding::new_descriptive(
+                "alt+p",
+                "Kill Line →".to_string(),
+                Direction::End.format_action("Kill line"),
+                Dispatch::ToEditor(KillLine(Direction::End)),
+            ),
+            Keybinding::new(
+                "alt+j",
+                Direction::Start.format_action("Delete Word"),
+                Dispatch::ToEditor(DeleteWord {
+                    short: false,
+                    direction: Direction::Start,
+                }),
+            ),
+            Keybinding::new(
+                "alt+l",
+                Direction::End.format_action("Delete Word"),
+                Dispatch::ToEditor(DeleteWord {
+                    short: false,
+                    direction: Direction::End,
+                }),
+            ),
+            Keybinding::new(
+                "alt+u",
+                Direction::Start.format_action("Delete Subword"),
+                Dispatch::ToEditor(DeleteWord {
+                    short: true,
+                    direction: Direction::Start,
+                }),
+            ),
+            Keybinding::new(
+                "alt+o",
+                Direction::End.format_action("Delete Subword"),
+                Dispatch::ToEditor(DeleteWord {
+                    short: true,
+                    direction: Direction::End,
+                }),
             ),
         ]
         .as_ref(),
