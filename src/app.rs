@@ -296,11 +296,23 @@ impl<T: Frontend> App<T> {
     pub fn run(mut self, entry_path: Option<AbsolutePath>) -> Result<(), anyhow::Error> {
         self.set_terminal_options()?;
 
-        if let Some(entry_path) = entry_path {
+        let first_dispatch = entry_path.map(|entry_path| {
             if entry_path.as_ref().is_dir() {
-                self.layout.open_file_explorer();
+                Dispatch::OpenFileExplorer
             } else {
-                self.open_file(&entry_path, BufferOwner::User, true, true)?;
+                Dispatch::OpenFile {
+                    path: entry_path,
+                    owner: BufferOwner::User,
+                    focus: true,
+                }
+            }
+        });
+
+        if let Some(first_dispatch) = first_dispatch {
+            if let Err(error) = self.sender.send(AppMessage::ExternalDispatch(Box::new(
+                first_dispatch.clone(),
+            ))) {
+                log::error!("Failed to send the first dispatch {first_dispatch:?} due to {error}");
             }
         }
 
@@ -1211,6 +1223,7 @@ impl<T: Frontend> App<T> {
             Dispatch::RaiseFormatterNotExist(formatter_error) => {
                 self.raise_formatter_error(formatter_error)?;
             }
+            Dispatch::OpenFileExplorer => self.layout.open_file_explorer(),
         }
         Ok(())
     }
@@ -3922,6 +3935,7 @@ pub enum Dispatch {
     OpenChangeWorkingDirectoryPrompt,
     OpenQuickfixItemsPicker,
     RaiseFormatterNotExist(FormatterCommand),
+    OpenFileExplorer,
 }
 
 /// Used to send notify host app about changes
