@@ -2863,7 +2863,7 @@ impl Editor {
         };
 
         let Some(path) = path else {
-            return Ok(Dispatches::default());
+            return Ok(Dispatches::one(Dispatch::OpenSaveAsPrompt));
         };
 
         self.clamp(context)?;
