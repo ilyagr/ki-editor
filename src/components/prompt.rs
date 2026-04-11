@@ -381,7 +381,7 @@ impl Component for Prompt {
 
     fn handle_dispatch_editor(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         dispatch: super::editor::DispatchEditor,
     ) -> anyhow::Result<Dispatches> {
         self.editor.handle_dispatch_editor(context, dispatch)
@@ -819,7 +819,6 @@ mod test_prompt {
                     scope: Scope::Local,
                     if_current_not_found: IfCurrentNotFound::LookForward,
                     run_search_after_config_updated: false,
-                    component_id: None,
                 }),
                 App(OpenSearchPrompt {
                     scope: Scope::Local,

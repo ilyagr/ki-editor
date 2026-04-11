@@ -11,7 +11,7 @@ use crate::{
     buffer::{Buffer, Line},
     char_index_range::{range_intersects, CharIndexRange},
     clipboard::Texts,
-    components::component::Component,
+    components::component::{Component, RenderTitleMode},
     context::{Context, GlobalMode, LocalSearchConfig, LocalSearchConfigMode},
     edit::{Action, ActionGroup, Edit, EditTransaction},
     git::{hunk::SimpleHunkKind, DiffMode, GitOperation as _, GitRepo},
@@ -93,15 +93,22 @@ impl Component for Editor {
     }
 
     fn set_content(&mut self, str: &str, context: &Context) -> Result<Dispatches, anyhow::Error> {
-        let dispatches = Ok(self.update_buffer(str));
+        let dispatches = self.update_buffer(str);
         self.clamp(context)?;
-        dispatches
+
+        // We need to send DocumentDidChange request to trigger syntax highlight
+        Ok(dispatches.chain(self.get_document_did_change_dispatch()))
     }
 
-    fn title(&self, context: &Context) -> String {
+    fn title(
+        &self,
+        context: &Context,
+        dimension: &Dimension,
+        render_title_mode: &RenderTitleMode,
+    ) -> String {
         let title = self.title.clone();
         title
-            .or_else(|| self.title_impl(context))
+            .or_else(|| self.title_impl(context, dimension, render_title_mode))
             .unwrap_or_else(|| "[No title]".to_string())
     }
 
@@ -198,7 +205,7 @@ impl Component for Editor {
 
     fn handle_dispatch_editor(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         dispatch: DispatchEditor,
     ) -> anyhow::Result<Dispatches> {
         log::info!(
@@ -253,7 +260,7 @@ impl Component for Editor {
             #[cfg(test)]
             MatchLiteral(literal) => return self.match_literal(&literal, context),
             EnterNormalMode => self.enter_normal_mode(context)?,
-            CursorAddToAllSelections => self.add_cursor_to_all_selections(context)?,
+            CursorAddToAllSelections => return self.add_cursor_to_all_selections(context),
             CursorKeepPrimaryOnly => self.cursor_keep_primary_only(),
             EnterSwapMode => self.enter_swap_mode(),
             ReplacePattern { config } => {
@@ -299,10 +306,6 @@ impl Component for Editor {
             SetScrollOffset(n) => self.set_scroll_offset(n),
             #[cfg(test)]
             SetLanguage(language) => self.set_language(*language)?,
-            #[cfg(test)]
-            ApplySyntaxHighlight => {
-                self.apply_syntax_highlighting(context)?;
-            }
             Save => return self.do_save(false, context),
             ForceSave => {
                 return self.do_save(true, context);
@@ -362,13 +365,7 @@ impl Component for Editor {
             CyclePrimarySelection(direction) => self.cycle_primary_selection(direction),
             SwapExtensionAnchor => self.selection_set.swap_anchor(),
             FilterSelectionMatchingSearch { maintain, search } => {
-                self.mode = Mode::Normal;
-                let search_config = parse_search_config(&search)?;
-                return Ok(self.filter_selection_matching_search(
-                    search_config.local_config(),
-                    maintain,
-                    context,
-                ));
+                return self.filter_selection_matching_search(&search, maintain, context);
             }
             EnterNewline => return self.enter_newline(context),
             DeleteCurrentCursor(direction) => self.delete_current_cursor(direction),
@@ -508,7 +505,7 @@ pub struct RegexHighlightRule {
     pub capture_styles: Vec<RegexHighlightRuleCaptureStyle>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RegexHighlightRuleCaptureStyle {
     /// 0 means the entire match.
     /// Refer https://docs.rs/regex/latest/regex/struct.Regex.html#method.captures
@@ -719,7 +716,7 @@ impl Editor {
 
     pub fn render_dropdown(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         render: &DropdownRender,
     ) -> anyhow::Result<Dispatches> {
         self.apply_dispatches(
@@ -872,11 +869,7 @@ impl Editor {
         &self,
         range: CharIndexRange,
     ) -> anyhow::Result<SelectionSet> {
-        let mode = if self.buffer().given_range_is_node(&range) {
-            SelectionMode::SyntaxNode
-        } else {
-            SelectionMode::Custom
-        };
+        let mode = self.selection_set.mode.primary().clone();
         let primary = self
             .selection_set
             .primary_selection()
@@ -944,6 +937,10 @@ impl Editor {
                 false,
                 new_scroll_offset,
                 Default::default(),
+                self.dimension(),
+                &self.reveal(),
+                &RenderTitleMode::Tabline,
+                true,
             );
             let grid_string = grid.grid.to_string();
             let grid_string_lines = grid_string.lines().collect_vec();
@@ -1034,12 +1031,12 @@ impl Editor {
         quickfix_list_items: &[QuickfixListItem],
         marks: &[CharIndexRange],
     ) -> anyhow::Result<Box<dyn selection_mode::SelectionModeTrait>> {
-        if use_current_selection_mode {
+        let mode = if use_current_selection_mode {
             self.selection_set.mode().clone()
         } else {
             SelectionMode::Subword
-        }
-        .to_selection_mode_trait_object(
+        };
+        mode.to_selection_mode_trait_object(
             &self.buffer(),
             selection,
             &self.cursor_direction,
@@ -3015,7 +3012,10 @@ impl Editor {
         start..end
     }
 
-    pub fn add_cursor_to_all_selections(&mut self, context: &Context) -> Result<(), anyhow::Error> {
+    pub fn add_cursor_to_all_selections(
+        &mut self,
+        context: &Context,
+    ) -> Result<Dispatches, anyhow::Error> {
         self.selection_set
             .add_all(&self.buffer.borrow(), &self.cursor_direction, context)?;
 
@@ -3030,7 +3030,7 @@ impl Editor {
             self.reveal = Some(Reveal::Cursor);
         }
         self.recalculate_scroll_offset(context);
-        Ok(())
+        Ok(Dispatches::default())
     }
 
     pub fn dispatch_selection_changed(&self) -> Dispatch {
@@ -3145,7 +3145,7 @@ impl Editor {
         .into())
     }
 
-    pub fn select_all(&mut self, context: &mut Context) -> anyhow::Result<Dispatches> {
+    pub fn select_all(&mut self, context: &Context) -> anyhow::Result<Dispatches> {
         self.handle_dispatch_editors(
             context,
             [
@@ -3265,25 +3265,9 @@ impl Editor {
         }
     }
 
-    #[cfg(test)]
-    pub fn apply_syntax_highlighting(&mut self, context: &mut Context) -> anyhow::Result<()> {
-        let source_code = self.text();
-        let mut buffer = self.buffer_mut();
-        if let Some(language) = buffer.language() {
-            use crate::syntax_highlight::SyntaxHighlightRequestBatchId;
-
-            let highlighted_spans = context.highlight(language, &source_code)?;
-            buffer.update_highlighted_spans(
-                SyntaxHighlightRequestBatchId::default(),
-                highlighted_spans,
-            );
-        }
-        Ok(())
-    }
-
     pub fn apply_dispatches(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         dispatches: Vec<DispatchEditor>,
     ) -> anyhow::Result<Dispatches> {
         let mut result = Vec::new();
@@ -3783,7 +3767,7 @@ impl Editor {
 
     fn handle_dispatch_editors(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         dispatch_editors: Vec<DispatchEditor>,
     ) -> Result<Dispatches, anyhow::Error> {
         Ok(Dispatches::new(
@@ -3799,17 +3783,31 @@ impl Editor {
 
     fn filter_selection_matching_search(
         &mut self,
-        local_search_config: &crate::context::LocalSearchConfig,
-        keep: bool,
+        search: &str,
+        maintain: bool,
         context: &Context,
-    ) -> Dispatches {
-        let search = local_search_config.search();
+    ) -> anyhow::Result<Dispatches> {
+        self.mode = Mode::Normal;
+
+        let (_, selection_set) = self.filter_selection_matching_search_impl(search, maintain)?;
+        Ok(self.update_selection_set(selection_set, true, context))
+    }
+
+    /// Returns true if no selection matches the search criteria
+    pub fn filter_selection_matching_search_impl(
+        &self,
+        search: &str,
+        maintain: bool,
+    ) -> anyhow::Result<(bool, SelectionSet)> {
+        let parsed = parse_search_config(search)?;
+        let local_search_config = parsed.local_config();
         let selections = self.selection_set.selections();
         let filtered = selections
             .iter()
             .filter_map(|selection| -> Option<_> {
                 let range = selection.extended_range();
                 let haystack = self.buffer().slice(&range).unwrap_or_default().to_string();
+                let search = local_search_config.search();
                 let is_match = match local_search_config.mode {
                     LocalSearchConfigMode::Regex(regex_config) => get_regex(&search, regex_config)
                         .ok()?
@@ -3817,31 +3815,33 @@ impl Editor {
                         .ok()?,
                     LocalSearchConfigMode::AstGrep => false,
                     LocalSearchConfigMode::NamingConventionAgnostic => {
-                        selection_mode::NamingConventionAgnostic::new(search.clone())
+                        selection_mode::NamingConventionAgnostic::new(search)
                             .find_all(&haystack)
                             .is_empty()
                             .not()
                     }
                 };
-                if keep && is_match || !keep && !is_match {
+                if maintain && is_match || !maintain && !is_match {
                     Some(selection.clone())
                 } else {
                     None
                 }
             })
             .collect_vec();
-        let selections = match filtered.split_first() {
-            Some((head, tail)) => NonEmpty {
-                head: head.clone(),
-                tail: tail.to_vec(),
-            },
-            None => selections.clone(),
+        let (selections, no_matches) = match filtered.split_first() {
+            Some((head, tail)) => (
+                NonEmpty {
+                    head: head.clone(),
+                    tail: tail.to_vec(),
+                },
+                false,
+            ),
+            None => (selections.clone(), true),
         };
-        self.update_selection_set(
+        Ok((
+            no_matches,
             self.selection_set.clone().set_selections(selections),
-            true,
-            context,
-        )
+        ))
     }
 
     fn delete_current_cursor(&mut self, direction: Direction) {
@@ -4003,7 +4003,6 @@ impl Editor {
                     .clone(),
             ),
             run_search_after_config_updated: true,
-            component_id: None,
         })
         .append(Dispatch::PushPromptHistory {
             key: super::prompt::PromptHistoryKey::Search,
@@ -4019,7 +4018,9 @@ impl Editor {
     }
 
     pub fn window_title_height(&self, context: &Context) -> usize {
-        self.title(context).lines().count()
+        self.title(context, &self.dimension(), &RenderTitleMode::Tabline)
+            .lines()
+            .count()
     }
 
     fn execute_completion(
@@ -4149,7 +4150,7 @@ impl Editor {
 
     fn handle_movement_with_prior_change(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         movement: Movement,
         prior_change: Option<PriorChange>,
     ) -> Result<Dispatches, anyhow::Error> {
@@ -4187,7 +4188,6 @@ impl Editor {
                     .clone(),
             ),
             run_search_after_config_updated: true,
-            component_id: None,
         });
         Ok(dispatches)
     }
@@ -4252,7 +4252,7 @@ impl Editor {
         self.apply_edit_transaction(edit_transaction, context)
     }
 
-    fn git_blame(&self, context: &mut Context) -> Result<Dispatches, anyhow::Error> {
+    fn git_blame(&self, context: &Context) -> Result<Dispatches, anyhow::Error> {
         let Some(file_path) = self.buffer().path() else {
             return Ok(Dispatches::default());
         };
@@ -4575,7 +4575,7 @@ impl Editor {
 
     fn duplicate_with_movement(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         get_gap_movement: GetGapMovement,
     ) -> Result<Dispatches, anyhow::Error> {
         let copied_texts = Texts::new(self.selection_set.map(|selection| {
@@ -4589,7 +4589,7 @@ impl Editor {
 
     fn duplicate_vertically(
         &mut self,
-        context: &mut Context,
+        context: &Context,
         direction: Direction,
     ) -> Result<Dispatches, anyhow::Error> {
         let copied_texts = Texts::new(self.selection_set.map(|selection| {
@@ -4601,6 +4601,19 @@ impl Editor {
         let edit_transaction =
             self.get_paste_vertically_edit_transaction(direction, |index| copied_texts.get(index));
         self.apply_edit_transaction(edit_transaction, context)
+    }
+
+    pub fn current_selection_is_first_or_last_selection(&self, direction: &Direction) -> bool {
+        self.selection_set
+            .current_selection_is_first_or_last_selection(direction)
+    }
+
+    pub fn cycle_primary_selection_to_first(&mut self) {
+        self.selection_set.cycle_primary_selection_to_first();
+    }
+
+    pub fn cycle_primary_selection_to_last(&mut self) {
+        self.selection_set.cycle_primary_selection_to_last();
     }
 }
 
@@ -4694,8 +4707,6 @@ pub enum DispatchEditor {
     },
     #[cfg(test)]
     SetLanguage(Box<shared::language::Language>),
-    #[cfg(test)]
-    ApplySyntaxHighlight,
     ReplaceCurrentSelectionWith(String),
     SelectLineAt(usize),
     SwapCursor,

@@ -30,7 +30,7 @@ pub use SelectionMode::*;
 
 use crate::{
     app::{NucleoSource, StatusLine},
-    components::editor_keymap::BUILTIN_KEYBOARD_LAYOUTS,
+    components::{component::RenderTitleMode, editor_keymap::BUILTIN_KEYBOARD_LAYOUTS},
     lsp::process::ResponseContext,
     scripting::{ScriptInput, ScriptOutput},
     selection_mode::GetGapMovement,
@@ -170,7 +170,15 @@ pub enum ExpectKind {
     ),
     GridCellLine(/*Row*/ usize, /*Column*/ usize, Color),
     GridCellStyleKey(Position, Option<StyleKey>),
+    AppGridCellStyleKey(Position, Option<StyleKey>),
     GridCellsStyleKey(Vec<Position>, Option<StyleKey>),
+    /// Referring to the whole app
+    AppRangeStyleKey(/*Search*/ &'static str, Option<StyleKey>),
+    AppRangeIndexStyleKey(
+        /*Search*/ &'static str,
+        /*Matching Index*/ usize,
+        Option<StyleKey>,
+    ),
     /// Referring to the current component, whatever it might be
     RangeStyleKey(/*Search*/ &'static str, Option<StyleKey>),
     /// Referring to the main editor
@@ -206,6 +214,9 @@ pub enum ExpectKind {
     CurrentEditorIncrementalSearchMatches(Vec<std::ops::Range<usize>>),
     CurrentRangeAndInitialRange(CharIndexRange, Option<CharIndexRange>),
     CurrentWorkingDirectory(AbsolutePath),
+    GlobalMultiCursorActivated(bool),
+    AppCursorPosition(Position),
+    CurrentMarks(Vec<(AbsolutePath, Vec<CharIndexRange>)>),
 }
 fn log<T: std::fmt::Debug>(s: T) {
     if !is_ci::cached() {
@@ -288,7 +299,7 @@ impl ExpectKind {
                 component
                     .borrow_mut()
                     .editor_mut()
-                    .get_grid(context, false)
+                    .get_grid(context, true)
                     .to_string(),
                 grid.to_string(),
             ),
@@ -312,11 +323,14 @@ impl ExpectKind {
                 &component.borrow().editor().get_cursor_position().unwrap(),
                 position,
             ),
+            AppCursorPosition(position) => {
+                contextualize(app.get_screen()?.cursor().unwrap().position(), position)
+            }
             EditorGridCursorPosition(position) => contextualize(
                 component
                     .borrow_mut()
                     .editor_mut()
-                    .get_grid(context, false)
+                    .get_grid(context, true)
                     .cursor
                     .unwrap()
                     .position(),
@@ -344,7 +358,7 @@ impl ExpectKind {
                 let grid = component
                     .borrow_mut()
                     .editor_mut()
-                    .get_grid(context, false)
+                    .get_grid(context, true)
                     .grid;
                 contextualize(
                     grid.rows[*row_index][*column_index].background_color,
@@ -355,7 +369,7 @@ impl ExpectKind {
                 component
                     .borrow_mut()
                     .editor_mut()
-                    .get_grid(context, false)
+                    .get_grid(context, true)
                     .grid
                     .rows[*row_index][*column_index]
                     .line
@@ -369,7 +383,7 @@ impl ExpectKind {
                     component
                         .borrow_mut()
                         .editor_mut()
-                        .get_grid(context, false)
+                        .get_grid(context, true)
                         .grid
                         .rows
                         .iter()
@@ -388,12 +402,23 @@ impl ExpectKind {
                     style_key.clone(),
                 )
             }
+            AppGridCellStyleKey(position, style_key) => contextualize(
+                app.get_screen()?
+                    .get_positioned_cells()
+                    .iter()
+                    .find(|cell| &cell.position == position)
+                    .unwrap()
+                    .cell
+                    .source
+                    .clone(),
+                style_key.clone(),
+            ),
             GridCellsStyleKey(positions, style_key) => (
                 positions.iter().all(|position| {
                     let actual_style_key = &component
                         .borrow_mut()
                         .editor_mut()
-                        .get_grid(context, false)
+                        .get_grid(context, true)
                         .grid
                         .rows[position.line][position.column]
                         .source;
@@ -408,12 +433,21 @@ impl ExpectKind {
                 }),
                 format!("Expected positions {positions:?} to be styled as {style_key:?}"),
             ),
+            AppRangeStyleKey(search, style_key) => {
+                run_range_style_key_check_on_app(app, search, style_key, None)
+            }
+            AppRangeIndexStyleKey(search, match_index, style_key) => {
+                run_range_style_key_check_on_app(app, search, style_key, Some(*match_index))
+            }
             RangeStyleKey(search, style_key) => {
-                run_range_style_key_check(component, context, search, style_key)
+                run_range_style_key_check_on_component(component, context, search, style_key)
             }
-            MainEditorRangeStyleKey(search, style_key) => {
-                run_range_style_key_check(app.get_current_editor(), context, search, style_key)
-            }
+            MainEditorRangeStyleKey(search, style_key) => run_range_style_key_check_on_component(
+                app.get_current_editor(),
+                context,
+                search,
+                style_key,
+            ),
             CompletionDropdownIsOpen(is_open) => {
                 contextualize(app.completion_dropdown_is_open(), *is_open)
             }
@@ -541,7 +575,11 @@ impl ExpectKind {
                 }))?;
                 contextualize(
                     expected,
-                    &app.current_component().borrow().title(app.context()),
+                    &app.current_component().borrow().title(
+                        app.context(),
+                        &app.current_component().borrow().editor().dimension(),
+                        &RenderTitleMode::Tabline,
+                    ),
                 )
             }
             CurrentSelectionMode(expected) => contextualize(
@@ -579,7 +617,7 @@ impl ExpectKind {
                 &app.current_component()
                     .borrow_mut()
                     .editor_mut()
-                    .get_grid(context, false)
+                    .get_grid(context, true)
                     .grid
                     .rows
                     .into_iter()
@@ -649,17 +687,31 @@ impl ExpectKind {
                     .canonicalize()
                     .unwrap(),
             ),
+            GlobalMultiCursorActivated(expected) => {
+                contextualize(expected, &app.glolbal_multicursor_activated())
+            }
+            CurrentMarks(expected) => contextualize(
+                expected,
+                &app.context()
+                    .marks()
+                    .iter()
+                    .map(|(path, marks)| (path.clone(), marks.clone()))
+                    .filter(|(_, marks)| !marks.is_empty())
+                    .sorted_by_key(|(path, _)| path.clone())
+                    .collect_vec(),
+            ),
         })
     }
 }
 
-fn run_range_style_key_check(
+fn run_range_style_key_check_on_component(
     component: Rc<RefCell<dyn Component>>,
     context: &Context,
     search: &'static str,
     style_key: &Option<StyleKey>,
 ) -> (bool, String) {
-    let grid = component.borrow_mut().editor_mut().get_grid(context, false);
+    let grid = component.borrow_mut().editor_mut().get_grid(context, true);
+
     let grid_string = grid.to_string();
     let matches = grid_string.match_indices(search).collect_vec();
     let byte_range = match matches.split_first() {
@@ -684,6 +736,63 @@ fn run_range_style_key_check(
             if actual_style_key != style_key {
                 log(format!(
                     "Expected {position:?} to be styled as {style_key:?}, but got {actual_style_key:?}"
+                ));
+            }
+            actual_style_key == style_key
+        }),
+        format!("Expected positions {positions:?} to be styled as {style_key:?}"),
+    )
+}
+
+fn run_range_style_key_check_on_app(
+    app: &mut App<MockFrontend>,
+    search: &'static str,
+    style_key: &Option<StyleKey>,
+    match_index: Option<usize>,
+) -> (bool, String) {
+    let mut screen = app.get_screen().unwrap();
+
+    let grid_string = screen.stringify();
+    let matches = grid_string.match_indices(search).collect_vec();
+    let (byte_start, str) = match match_index {
+        Some(match_index) => matches.get(match_index).unwrap_or_else(|| {
+            panic!(
+                "Unable to get element at index {} in vector {:?}",
+                match_index, matches
+            )
+        }),
+        None => match matches.split_first() {
+            Some(((byte_start, str), [])) => &(*byte_start, *str),
+            Some((_, _)) => panic!(
+                "{search:?} should only match 1 range, but it matches {} ranges.",
+                matches.len()
+            ),
+            None => panic!("{search:?} should only match 1 range, but it matches nothing."),
+        },
+    };
+    let byte_range = *byte_start..byte_start + str.len();
+    // We use Buffer to obtain the position range given the byte range
+    let buffer = Buffer::new(None, &grid_string);
+    let positions = byte_range
+        .map(|byte| buffer.byte_to_position(byte).unwrap())
+        .collect_vec();
+    if positions.is_empty() {
+        panic!("There are 0 positions");
+    }
+    let cells = screen.get_positioned_cells();
+
+    (
+        positions.iter().all(|position| {
+            let actual_style_key = &cells
+                .iter()
+                .find(|cell| &cell.position == position)
+                .unwrap()
+                .cell
+                .source;
+            if actual_style_key != style_key {
+                log(format!(
+                    "Expected {:?} to be styled as {:?}, but got {:?}",
+                    position, style_key, actual_style_key
                 ));
             }
             actual_style_key == style_key
@@ -1694,7 +1803,6 @@ fn esc_global_quickfix_mode() -> Result<(), anyhow::Error> {
                 scope: Scope::Global,
                 if_current_not_found: IfCurrentNotFound::LookForward,
                 run_search_after_config_updated: true,
-                component_id: None,
             }),
             WaitForAppMessage(regex!("GlobalSearchFinished")),
             Expect(CurrentGlobalMode(Some(GlobalMode::QuickfixListItem))),
@@ -1857,7 +1965,6 @@ fn test_global_search_replace(
                 scope: Scope::Global,
                 if_current_not_found: IfCurrentNotFound::LookForward,
                 run_search_after_config_updated: true,
-                component_id: None,
             }
         };
         let main_rs = s.main_rs();
@@ -1929,7 +2036,6 @@ fn test_global_repeat_search() -> anyhow::Result<()> {
                 scope: Scope::Global,
                 if_current_not_found: IfCurrentNotFound::LookForward,
                 run_search_after_config_updated: true,
-                component_id: None,
             }),
             WaitForAppMessage(regex!("GlobalSearchFinished")),
             Expect(CurrentSelectedTexts(&["bye"])),
@@ -2013,7 +2119,6 @@ fn quickfix_list_basic() -> Result<(), anyhow::Error> {
                 scope: Scope::Global,
                 if_current_not_found: IfCurrentNotFound::LookForward,
                 run_search_after_config_updated: true,
-                component_id: None,
             }
         };
         let path_1: AbsolutePath = s.new_path("a.txt").try_into().unwrap();
@@ -2845,7 +2950,6 @@ fn global_search_should_not_using_empty_pattern() -> anyhow::Result<()> {
                 scope: Scope::Global,
                 if_current_not_found: IfCurrentNotFound::LookForward,
                 run_search_after_config_updated: true,
-                component_id: None,
             }),
             Expect(ExpectKind::Quickfixes(Box::new([]))),
         ])
@@ -3819,7 +3923,7 @@ fn navigating_to_marked_file_that_is_deleted_should_not_cause_error() -> anyhow:
 
 
 Cycle marked file error
-1│█he file mark "src/main.rs" is removed from the list as it cannot be opened
+1│The file mark "src/main.rs" is removed from the list as it cannot be opened
 ↪│due to the following error:
 2│
 3│The path "src/main.rs" does not exist."#
@@ -4144,7 +4248,7 @@ fn marking_selections_should_refresh_mark_quickfix() -> Result<(), anyhow::Error
 Quickfix list
 1│.gitignore
 2│    1:1  foo
-3│█   3:1  spam
+3│    3:1  spam
 4│    4:1  baz"
                     .to_string(),
             )),
@@ -4210,7 +4314,6 @@ fn global_search_should_not_change_dirty_status() -> anyhow::Result<()> {
                 scope: Scope::Global,
                 if_current_not_found: IfCurrentNotFound::LookForward,
                 run_search_after_config_updated: true,
-                component_id: None,
             }),
             WaitForAppMessage(regex!("GlobalSearchFinished")),
             Expect(CurrentGlobalMode(Some(GlobalMode::QuickfixListItem))),

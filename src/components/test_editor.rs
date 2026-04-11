@@ -1978,7 +1978,12 @@ fn main() {
 
 #[test]
 fn syntax_highlight_spans_updated_by_edit() -> anyhow::Result<()> {
-    execute_test(|s| {
+    let options = RunTestOptions {
+        enable_lsp: false,
+        enable_syntax_highlighting: true,
+        enable_file_watcher: false,
+    };
+    execute_test_custom(options, |s| {
         let theme = Theme::default();
         Box::new([
             App(OpenFile {
@@ -2003,7 +2008,7 @@ fn syntax_highlight_spans_updated_by_edit() -> anyhow::Result<()> {
                 width: 100,
                 height: 2,
             })),
-            Editor(ApplySyntaxHighlight),
+            WaitForAppMessage(regex!("SyntaxHighlightResponse")),
             Expect(ExpectKind::HighlightSpans(
                 0..11,
                 StyleKey::Syntax(IndexedHighlightGroup::from_str("comment").unwrap()),
@@ -2046,7 +2051,12 @@ fn syntax_highlight_spans_updated_by_edit() -> anyhow::Result<()> {
 
 #[test]
 fn syntax_highlighting() -> anyhow::Result<()> {
-    execute_test(|s| {
+    let options = RunTestOptions {
+        enable_lsp: false,
+        enable_syntax_highlighting: true,
+        enable_file_watcher: false,
+    };
+    execute_test_custom(options, |s| {
         let theme = Theme::default();
         Box::new([
             App(OpenFile {
@@ -2074,7 +2084,7 @@ fn main() { // too long
                 crate::config::from_extension("rs").unwrap(),
             ))),
             Editor(MatchLiteral("bar".to_string())),
-            Editor(ApplySyntaxHighlight),
+            WaitForAppMessage(regex!("SyntaxHighlightResponse")),
             Editor(SetRectangle(Rectangle {
                 origin: Position::default(),
                 width: 21,
@@ -2747,21 +2757,18 @@ fn replace_with_pattern() -> Result<(), anyhow::Error> {
                         scope: Scope::Local,
                         if_current_not_found: IfCurrentNotFound::LookForward,
                         run_search_after_config_updated: true,
-                        component_id: None,
                     }),
                     App(UpdateLocalSearchConfig {
                         update: LocalSearchConfigUpdate::Search(search_pattern.to_string()),
                         scope: Scope::Local,
                         if_current_not_found: IfCurrentNotFound::LookForward,
                         run_search_after_config_updated: true,
-                        component_id: None,
                     }),
                     App(UpdateLocalSearchConfig {
                         update: LocalSearchConfigUpdate::Replacement(replace_pattern.to_string()),
                         scope: Scope::Local,
                         if_current_not_found: IfCurrentNotFound::LookForward,
                         run_search_after_config_updated: true,
-                        component_id: None,
                     }),
                     Editor(ReplaceWithPattern),
                     Expect(CurrentComponentContent(expected_content)),

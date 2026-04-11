@@ -59,11 +59,7 @@ pub fn multicursor_menu_keymap(editor: &Editor) -> Keymap {
     let secondary_selection_mode_keybindings =
         keymap_secondary_selection_modes_init(editor, Some(PriorChange::EnterMultiCursorMode));
     let other_keybindings = [
-        Keybinding::new(
-            "j",
-            "Curs All",
-            Dispatch::ToEditor(CursorAddToAllSelections),
-        ),
+        Keybinding::new("j", "Curs All", Dispatch::AddCursorToAllSelections),
         Keybinding::new(
             "i",
             "Keep Match",
@@ -74,11 +70,7 @@ pub fn multicursor_menu_keymap(editor: &Editor) -> Keymap {
             "Remove Match",
             Dispatch::OpenFilterSelectionsPrompt { maintain: false },
         ),
-        Keybinding::new(
-            "l",
-            "Keep Primary Curs",
-            Dispatch::ToEditor(DispatchEditor::CursorKeepPrimaryOnly),
-        ),
+        Keybinding::new("l", "Keep Primary Curs", Dispatch::KeepCursorPrimaryOnly),
     ];
     Keymap::new(
         &[].into_iter()
@@ -368,11 +360,7 @@ pub fn space_keymap_legend_config(editor: &Editor, context: &Context) -> KeymapL
 
         keymap: Keymap::new(
             &[
-                Keybinding::new(
-                    "u",
-                    "÷ Selection",
-                    Dispatch::ToEditor(DispatchEditor::ToggleReveal(Reveal::CurrentSelectionMode)),
-                ),
+                Keybinding::new("u", "÷ Selection", Dispatch::ToggleRevealSelections),
                 Keybinding::new(
                     "i",
                     "÷ Cursor",
@@ -812,20 +800,16 @@ pub fn multicursor_momentary_layer_keymap(editor: &Editor) -> Keymap {
             )
         })
         .chain([
-            Keybinding::new(
-                "n",
-                "Delete Curs",
-                Dispatch::ToEditor(DeleteCurrentCursor(Direction::End)),
-            ),
+            Keybinding::new("n", "Delete Curs", Dispatch::DeleteCursor),
             Keybinding::new_dynamic(
                 "h",
                 Direction::Start.format_action("Curs"),
-                Dispatch::ToEditor(CyclePrimarySelection(Direction::Start)),
+                Dispatch::CycleCursor(Direction::Start),
             ),
             Keybinding::new_dynamic(
                 ";",
                 Direction::End.format_action("Curs"),
-                Dispatch::ToEditor(CyclePrimarySelection(Direction::End)),
+                Dispatch::CycleCursor(Direction::End),
             ),
             Keybinding::new(
                 "m",
@@ -1246,7 +1230,7 @@ pub fn keymap_actions(
         Keybinding::new("T", "Raise", Dispatch::ToEditor(Replace(Movement::Expand))),
         Keybinding::new("z", "Undo", Dispatch::ToEditor(Undo)),
         Keybinding::new("Z", "Redo", Dispatch::ToEditor(Redo)),
-        Keybinding::new("enter", "Save", Dispatch::ToEditor(Save)),
+        Keybinding::new("enter", "Save", Dispatch::SaveFile),
         Keybinding::new("shift+enter", "Save As", Dispatch::OpenSaveAsPrompt),
         Keybinding::new(
             "G",

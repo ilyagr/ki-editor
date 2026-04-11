@@ -1,4 +1,5 @@
 mod buffer;
+mod multibuffer;
 use tracing_subscriber::filter::LevelFilter;
 
 mod git;

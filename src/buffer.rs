@@ -654,6 +654,7 @@ impl Buffer {
         self.rope.try_remove(edit.range.start.0..edit.end().0)?;
         self.rope
             .try_insert(edit.range.start.0, edit.new.to_string().as_str())?;
+
         let dispatches = self.flag_as_modified();
 
         // Update all the non-positional spans
