@@ -217,6 +217,7 @@ pub enum ExpectKind {
     GlobalMultiCursorActivated(bool),
     AppCursorPosition(Position),
     CurrentMarks(Vec<(AbsolutePath, Vec<CharIndexRange>)>),
+    CurrentTreeReparsedCount(usize),
 }
 fn log<T: std::fmt::Debug>(s: T) {
     if !is_ci::cached() {
@@ -699,6 +700,14 @@ impl ExpectKind {
                     .filter(|(_, marks)| !marks.is_empty())
                     .sorted_by_key(|(path, _)| path.clone())
                     .collect_vec(),
+            ),
+            CurrentTreeReparsedCount(expected) => contextualize(
+                expected,
+                &app.get_current_editor()
+                    .borrow()
+                    .editor()
+                    .buffer()
+                    .tree_reparsed_count,
             ),
         })
     }
@@ -2004,7 +2013,7 @@ fn test_global_search_replace(
                 owner: BufferOwner::User,
                 focus: true,
             }),
-            Editor(Undo),
+            Editor(FineUndo),
             // Expect the content of the main.rs buffer to be reverted
             Expect(FileContent(s.main_rs(), main_content.to_string())),
         ])
@@ -4530,6 +4539,45 @@ fn saving_content_of_pathless_buffer_into_a_new_file_using_enter() -> anyhow::Re
 
 #[test]
 fn cycling_window_focus_should_not_create_more_windows() -> anyhow::Result<()> {
+    execute_test(|s| {
+        Box::new([
+            App(OpenFile {
+                path: s.main_rs(),
+                owner: BufferOwner::User,
+                focus: true,
+            }),
+            App(OpenThemePicker),
+            Expect(CurrentComponentTitle("Theme".to_string())),
+            Expect(ComponentsLength(3)),
+            App(OtherWindow),
+            Expect(CurrentComponentTitle("Completion".to_string())),
+            Expect(ComponentsLength(3)),
+            App(OtherWindow),
+            Expect(CurrentComponentTitle(
+                "\u{200b} [ ] 🦀 main.rs \u{200b}".to_string(),
+            )),
+            Expect(ComponentsLength(3)),
+            App(OtherWindow),
+            Expect(CurrentComponentTitle("Theme".to_string())),
+            Expect(ComponentsLength(3)),
+            App(OtherWindow),
+            Expect(CurrentComponentTitle("Completion".to_string())),
+            Expect(ComponentsLength(3)),
+            App(OtherWindow),
+            Expect(CurrentComponentTitle(
+                "\u{200b} [ ] 🦀 main.rs \u{200b}".to_string(),
+            )),
+            Expect(ComponentsLength(3)),
+            App(OtherWindow),
+            Expect(CurrentComponentTitle("Theme".to_string())),
+            Expect(ComponentsLength(3)),
+        ])
+    })
+}
+
+#[test]
+/// This test case ensure that ctrl+z should not be treated as a positional keybinding.
+fn ctrl_z_should_trigger_suspend_regardless_of_current_layout() -> anyhow::Result<()> {
     execute_test(|s| {
         Box::new([
             App(OpenFile {

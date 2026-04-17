@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     app::{Dimension, Dispatch, Dispatches, RequestParams, Scope, ToHostApp},
-    buffer::{Buffer, Line},
+    buffer::{Buffer, EditHistoryKind, Line},
     char_index_range::{range_intersects, CharIndexRange},
     clipboard::Texts,
     components::component::{Component, RenderTitleMode},
@@ -121,7 +121,7 @@ impl Component for Editor {
         content: String,
         context: &Context,
     ) -> anyhow::Result<Dispatches> {
-        self.insert(&content, context)
+        self.insert(&content, context, EditHistoryKind::Coarse)
     }
 
     fn get_cursor_position(&self) -> anyhow::Result<Position> {
@@ -256,7 +256,7 @@ impl Component for Editor {
             EnableSelectionExtension => self.enable_selection_extension(),
             DisableSelectionExtension => self.disable_selection_extension(),
             EnterInsertMode(direction) => return self.enter_insert_mode(direction, context),
-            Insert(string) => return self.insert(&string, context),
+            Insert(string) => return self.insert(&string, context, EditHistoryKind::Coarse),
             #[cfg(test)]
             MatchLiteral(literal) => return self.match_literal(&literal, context),
             EnterNormalMode => self.enter_normal_mode(context)?,
@@ -273,10 +273,7 @@ impl Component for Editor {
                     .chain(self.get_document_did_change_dispatch())
                     .chain(dispatches));
             }
-            Undo => {
-                let dispatches = self.undo(context);
-                return dispatches;
-            }
+            FineUndo => return self.fine_undo(context),
             KillLine(direction) => return self.kill_line(direction, context),
             #[cfg(test)]
             Reset => self.reset(),
@@ -288,7 +285,7 @@ impl Component for Editor {
             MoveToLineStart => return self.move_to_line_start(context),
             MoveToLineEnd => return self.move_to_line_end(),
             SelectLine(movement) => return self.select_line(movement, context),
-            Redo => return self.redo(context),
+            FineRedo => return self.fine_redo(context),
             DeleteOne => return self.delete_one(context, false),
             CutOne => return self.delete_one(context, true),
             Change => return self.change(context),
@@ -431,6 +428,9 @@ impl Component for Editor {
                 return self.duplicate_with_movement(context, get_gap_movement)
             }
             DuplicateVertically(direction) => return self.duplicate_vertically(context, direction),
+            CoarseUndo => return self.coarse_undo(context),
+            CoarseRedo => return self.coarse_redo(context),
+            InsertChar(c) => return self.insert_char(context, c),
         }
         Ok(Dispatches::default())
     }
@@ -1562,10 +1562,11 @@ impl Editor {
             .chain(dispatches))
     }
 
-    pub fn apply_edit_transaction(
+    fn apply_edit_transaction_with_edit_history_kind(
         &mut self,
         edit_transaction: EditTransaction,
         context: &Context,
+        kind: EditHistoryKind,
     ) -> anyhow::Result<Dispatches> {
         // Apply the transaction to the buffer
         let last_visible_line = self.last_visible_line(context);
@@ -1576,6 +1577,7 @@ impl Editor {
                 self.mode != Mode::Insert,
                 true,
                 last_visible_line,
+                kind,
             )?;
 
         // Create a BufferEditTransaction dispatch for external integrations
@@ -1615,6 +1617,18 @@ impl Editor {
         Ok(dispatches)
     }
 
+    pub fn apply_edit_transaction(
+        &mut self,
+        edit_transaction: EditTransaction,
+        context: &Context,
+    ) -> anyhow::Result<Dispatches> {
+        self.apply_edit_transaction_with_edit_history_kind(
+            edit_transaction,
+            context,
+            EditHistoryKind::Coarse,
+        )
+    }
+
     pub fn get_document_did_change_dispatch(&mut self) -> Dispatches {
         [Dispatch::DocumentDidChange {
             component_id: self.id(),
@@ -1628,12 +1642,20 @@ impl Editor {
         .into()
     }
 
-    pub fn undo(&mut self, context: &Context) -> anyhow::Result<Dispatches> {
-        self.undo_or_redo(true, context)
+    pub fn undo(
+        &mut self,
+        context: &Context,
+        reparse_tree: bool,
+    ) -> anyhow::Result<Option<(Dispatches, EditHistoryKind)>> {
+        self.undo_or_redo(true, context, reparse_tree)
     }
 
-    pub fn redo(&mut self, context: &Context) -> anyhow::Result<Dispatches> {
-        self.undo_or_redo(false, context)
+    pub fn redo(
+        &mut self,
+        context: &Context,
+        reparse_tree: bool,
+    ) -> anyhow::Result<Option<(Dispatches, EditHistoryKind)>> {
+        self.undo_or_redo(false, context, reparse_tree)
     }
 
     pub fn swap_cursor(&mut self, context: &Context) {
@@ -1799,7 +1821,12 @@ impl Editor {
         Ok(self.copy().chain(self.change(context)?))
     }
 
-    pub fn insert(&mut self, s: &str, context: &Context) -> anyhow::Result<Dispatches> {
+    pub fn insert(
+        &mut self,
+        s: &str,
+        context: &Context,
+        kind: EditHistoryKind,
+    ) -> anyhow::Result<Dispatches> {
         let edit_transaction = EditTransaction::from_action_groups(
             self.selection_set
                 .map(|selection| {
@@ -1827,7 +1854,7 @@ impl Editor {
                 .into(),
         );
 
-        self.apply_edit_transaction(edit_transaction, context)
+        self.apply_edit_transaction_with_edit_history_kind(edit_transaction, context, kind)
     }
 
     pub fn get_request_params(&self) -> Option<RequestParams> {
@@ -2123,6 +2150,7 @@ impl Editor {
                         true,
                         true,
                         self.last_visible_line(context),
+                        EditHistoryKind::Coarse,
                     )
                     .is_err()
                 {
@@ -3182,19 +3210,24 @@ impl Editor {
         });
     }
 
-    fn undo_or_redo(&mut self, undo: bool, context: &Context) -> Result<Dispatches, anyhow::Error> {
+    fn undo_or_redo(
+        &mut self,
+        undo: bool,
+        context: &Context,
+        reparse_tree: bool,
+    ) -> Result<Option<(Dispatches, EditHistoryKind)>, anyhow::Error> {
         let last_visible_line = self.last_visible_line(context);
 
         // Call the appropriate buffer method to perform undo/redo
         let result = if undo {
-            self.buffer_mut().undo(last_visible_line)
+            self.buffer_mut().undo(last_visible_line, reparse_tree)
         } else {
-            self.buffer_mut().redo(last_visible_line)
+            self.buffer_mut().redo(last_visible_line, reparse_tree)
         }?;
 
         // Create dispatches for document changes and buffer edit transaction
-        let dispatches = match result {
-            Some((dispatches, selection_set, diff_edits, edits)) => {
+        let (dispatches, edit_history_kind) = match result {
+            Some((dispatches, selection_set, diff_edits, edits, edit_history_kind)) => {
                 // Update selection set
                 let update_selection_dispatches =
                     self.update_selection_set(selection_set, false, context);
@@ -3211,11 +3244,13 @@ impl Editor {
                     Dispatches::default()
                 };
 
-                dispatches
+                let dispatches = dispatches
                     .chain(update_selection_dispatches)
-                    .chain(dispatch)
+                    .chain(dispatch);
+
+                (dispatches, edit_history_kind)
             }
-            Option::None => Dispatches::default(),
+            Option::None => return Ok(None),
         };
 
         // Add document did change dispatch
@@ -3226,7 +3261,7 @@ impl Editor {
 
         log::trace!("undo_or_redo: Returning dispatches");
 
-        Ok(dispatches)
+        Ok(Some((dispatches, edit_history_kind)))
     }
 
     #[cfg(test)]
@@ -4661,6 +4696,87 @@ impl Editor {
     pub fn cycle_primary_selection_to_last(&mut self) {
         self.selection_set.cycle_primary_selection_to_last();
     }
+
+    fn coarse_undo(&mut self, context: &Context) -> Result<Dispatches, anyhow::Error> {
+        let Some((first_dispatches, edit_history_kind)) = self.undo(context, false)? else {
+            return Ok(Dispatches::default());
+        };
+
+        if edit_history_kind == EditHistoryKind::Coarse {
+            return Ok(first_dispatches);
+        }
+
+        // If edit_history_kind is Fine: keep undoing until the next edit history on the stack is a Coarse one
+        let dispatches = std::iter::from_fn(|| {
+            let last_edit_history_is_fine = self
+                .buffer()
+                .peek_undo_stack()
+                .map(|history| history.kind == EditHistoryKind::Fine)
+                .unwrap_or(false);
+
+            if last_edit_history_is_fine {
+                self.undo(context, false).ok().flatten()
+            } else {
+                None
+            }
+        })
+        .map(|(dispatches, _)| dispatches)
+        .fold(first_dispatches, |accumulated_dispatches, dispatches| {
+            accumulated_dispatches.chain(dispatches)
+        });
+
+        self.buffer_mut().reparse_tree()?;
+        Ok(dispatches)
+    }
+
+    fn coarse_redo(&mut self, context: &Context) -> Result<Dispatches, anyhow::Error> {
+        let Some((first_dispatches, edit_history_kind)) = self.redo(context, false)? else {
+            return Ok(Dispatches::default());
+        };
+
+        if edit_history_kind == EditHistoryKind::Coarse {
+            return Ok(first_dispatches);
+        }
+
+        // If edit_history_kind is Fine: keep redoing until the next edit history on the stack is a Coarse one
+        let dispatches = std::iter::from_fn(|| {
+            let last_edit_history_is_fine = self
+                .buffer()
+                .peek_redo_stack()
+                .map(|history| history.kind == EditHistoryKind::Fine)
+                .unwrap_or(false);
+
+            if last_edit_history_is_fine {
+                self.redo(context, false).ok().flatten()
+            } else {
+                None
+            }
+        })
+        .map(|(dispatches, _)| dispatches)
+        .fold(first_dispatches, |accumulated_dispatches, dispatches| {
+            accumulated_dispatches.chain(dispatches)
+        });
+        self.buffer_mut().reparse_tree()?;
+        Ok(dispatches)
+    }
+
+    fn insert_char(&mut self, context: &Context, c: char) -> Result<Dispatches, anyhow::Error> {
+        self.insert(&c.to_string(), context, EditHistoryKind::Fine)
+    }
+
+    fn fine_undo(&mut self, context: &Context) -> Result<Dispatches, anyhow::Error> {
+        Ok(self
+            .undo(context, true)?
+            .map(|(dispatches, _)| dispatches)
+            .unwrap_or_default())
+    }
+
+    fn fine_redo(&mut self, context: &Context) -> Result<Dispatches, anyhow::Error> {
+        Ok(self
+            .redo(context, true)?
+            .map(|(dispatches, _)| dispatches)
+            .unwrap_or_default())
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
@@ -4720,6 +4836,7 @@ pub enum DispatchEditor {
     SelectLine(Movement),
     Backspace,
     Insert(String),
+    InsertChar(char),
     MoveToLineStart,
     MoveToLineEnd,
     #[cfg(test)]
@@ -4739,8 +4856,8 @@ pub enum DispatchEditor {
     ReplacePattern {
         config: crate::context::LocalSearchConfig,
     },
-    Undo,
-    Redo,
+    FineUndo,
+    FineRedo,
     KillLine(Direction),
     #[cfg(test)]
     Reset,
@@ -4825,6 +4942,8 @@ pub enum DispatchEditor {
     PasteVertically(Direction),
     DuplicateWithMovement(GetGapMovement),
     DuplicateVertically(Direction),
+    CoarseUndo,
+    CoarseRedo,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
