@@ -4703,6 +4703,7 @@ impl Editor {
         };
 
         if edit_history_kind == EditHistoryKind::Coarse {
+            self.buffer_mut().reparse_tree()?;
             return Ok(first_dispatches);
         }
 
@@ -4735,6 +4736,7 @@ impl Editor {
         };
 
         if edit_history_kind == EditHistoryKind::Coarse {
+            self.buffer_mut().reparse_tree()?;
             return Ok(first_dispatches);
         }
 
