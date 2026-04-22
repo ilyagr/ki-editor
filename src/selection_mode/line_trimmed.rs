@@ -1,8 +1,9 @@
 use std::ops::Not;
 
 use crate::{
-    char_index_range::CharIndexRange, components::editor::IfCurrentNotFound, selection::CharIndex,
-    selection_mode::ApplyMovementResult,
+    char_index_range::CharIndexRange,
+    components::editor::IfCurrentNotFound,
+    selection::{CharIndex, Selection},
 };
 
 use super::{ByteRange, PositionBasedSelectionMode};
@@ -106,11 +107,7 @@ impl PositionBasedSelectionMode for LineTrimmed {
         get_line(buffer, cursor_char_index, if_current_not_found)
     }
 
-    fn down(
-        &self,
-        params: &super::SelectionModeParams,
-        _sticky_column_index: Option<usize>,
-    ) -> anyhow::Result<Option<ApplyMovementResult>> {
+    fn next(&self, params: &super::SelectionModeParams) -> anyhow::Result<Option<Selection>> {
         let buffer = params.buffer;
         let start_char_index = {
             let cursor_char_index = params.cursor_char_index();
@@ -146,13 +143,13 @@ impl PositionBasedSelectionMode for LineTrimmed {
                         IfCurrentNotFound::LookForward,
                     )?
                     .and_then(|byte_range| {
-                        Some(ApplyMovementResult::from_selection(
+                        Some(
                             params.current_selection.clone().set_range(
                                 buffer
                                     .byte_range_to_char_index_range(byte_range.range())
                                     .ok()?,
                             ),
-                        ))
+                        )
                     }));
             } else {
                 line_index += 1;
@@ -161,11 +158,7 @@ impl PositionBasedSelectionMode for LineTrimmed {
         Ok(None)
     }
 
-    fn up(
-        &self,
-        params: &super::SelectionModeParams,
-        _sticky_column_index: Option<usize>,
-    ) -> anyhow::Result<Option<ApplyMovementResult>> {
+    fn previous(&self, params: &super::SelectionModeParams) -> anyhow::Result<Option<Selection>> {
         let buffer = params.buffer;
         let start_char_index = {
             let cursor_char_index = params
@@ -205,13 +198,13 @@ impl PositionBasedSelectionMode for LineTrimmed {
                         IfCurrentNotFound::LookBackward,
                     )?
                     .and_then(|byte_range| {
-                        Some(ApplyMovementResult::from_selection(
+                        Some(
                             params.current_selection.clone().set_range(
                                 buffer
                                     .byte_range_to_char_index_range(byte_range.range())
                                     .ok()?,
                             ),
-                        ))
+                        )
                     }));
             } else if line_index == 0 {
                 break;
@@ -373,7 +366,7 @@ baz",
     }
 
     #[test]
-    fn prev_next_movement() -> Result<(), anyhow::Error> {
+    fn up_down_movement() -> Result<(), anyhow::Error> {
         execute_test(|s| {
             Box::new([
                 App(OpenFile {
@@ -387,13 +380,13 @@ baz",
                     SelectionMode::Line,
                 )),
                 Expect(CurrentSelectedTexts(&["a"])),
-                Editor(MoveSelection(Movement::Next)),
+                Editor(MoveSelection(Movement::Down)),
                 Expect(CurrentSelectedTexts(&[""])),
-                Editor(MoveSelection(Movement::Next)),
+                Editor(MoveSelection(Movement::Down)),
                 Expect(CurrentSelectedTexts(&["b"])),
-                Editor(MoveSelection(Movement::Previous)),
+                Editor(MoveSelection(Movement::Up)),
                 Expect(CurrentSelectedTexts(&[""])),
-                Editor(MoveSelection(Movement::Previous)),
+                Editor(MoveSelection(Movement::Up)),
                 Expect(CurrentSelectedTexts(&["a"])),
             ])
         })
@@ -593,7 +586,7 @@ foo
     }
 
     #[test]
-    fn able_to_move_up_when_at_last_empty_line() -> anyhow::Result<()> {
+    fn able_to_move_prev_when_at_last_empty_line() -> anyhow::Result<()> {
         execute_test(|s| {
             Box::new([
                 App(OpenFile {
@@ -618,7 +611,7 @@ hello
                 Editor(MoveSelection(Movement::Next)),
                 Expect(CurrentSelectedTexts(&[""])),
                 Expect(ExpectKind::EditorCursorPosition(Position::new(4, 0))),
-                Editor(MoveSelection(Movement::Up)),
+                Editor(MoveSelection(Movement::Previous)),
                 Expect(CurrentSelectedTexts(&[""])),
                 Editor(MoveSelection(Movement::Left)),
                 Expect(CurrentSelectedTexts(&["world"])),
@@ -654,7 +647,7 @@ hello
     }
 
     #[test]
-    fn empty_line_navigation_using_prev_next() -> anyhow::Result<()> {
+    fn empty_line_navigation_using_up_down() -> anyhow::Result<()> {
         execute_test(|s| {
             Box::new([
                 App(OpenFile {
@@ -667,11 +660,11 @@ hello
                     IfCurrentNotFound::LookForward,
                     SelectionMode::Line,
                 )),
-                Editor(MoveSelection(Movement::Next)),
+                Editor(MoveSelection(Movement::Down)),
                 Expect(EditorCursorPosition(Position::new(1, 0))),
-                Editor(MoveSelection(Movement::Next)),
+                Editor(MoveSelection(Movement::Down)),
                 Expect(EditorCursorPosition(Position::new(2, 0))),
-                Editor(MoveSelection(Movement::Previous)),
+                Editor(MoveSelection(Movement::Up)),
                 Expect(EditorCursorPosition(Position::new(1, 0))),
             ])
         })
