@@ -32,5 +32,8 @@
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null]
     ],
-    "languages": {}
+    "languages": {},
+    "indent_width": 4,
+    "indent_char": "space",
+    "show_key_in_keymap": false
 }
