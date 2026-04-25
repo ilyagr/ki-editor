@@ -3550,7 +3550,7 @@ fn select_next_line_when_cursor_is_at_last_space_of_current_line() -> anyhow::Re
             }),
             Editor(SetContent("abc \n yo".to_string())),
             Editor(SetSelectionMode(IfCurrentNotFound::LookForward, Character)),
-            Editor(MoveSelection(Last)),
+            Editor(MoveSelection(Next)),
             Editor(MoveSelection(Right)),
             Expect(CurrentSelectedTexts(&[" "])),
             Editor(MoveSelection(Left)),
@@ -3572,13 +3572,13 @@ fn first_last_char() -> anyhow::Result<()> {
                 owner: BufferOwner::User,
                 focus: true,
             }),
-            Editor(SetContent("babyHelloCamp".to_string())),
+            Editor(SetContent(" babyHelloCamp\n".to_string())),
             Editor(MatchLiteral("Hello".to_string())),
             Editor(SetSelectionMode(IfCurrentNotFound::LookForward, Character)),
             Editor(MoveSelection(Last)),
-            Expect(CurrentSelectedTexts(&["o"])),
+            Expect(CurrentSelectedTexts(&["\n"])),
             Editor(MoveSelection(First)),
-            Expect(CurrentSelectedTexts(&["H"])),
+            Expect(CurrentSelectedTexts(&[" "])),
         ])
     })
 }
